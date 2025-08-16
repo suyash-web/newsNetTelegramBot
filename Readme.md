@@ -10,7 +10,3 @@ It uses **webhooks** instead of polling to receive updates from Telegram, making
 - Fetches news from an external API (via your `api_key`).
 - Persists user data or preferences in an **SQLite database**.
 - Deployed easily on **PythonAnywhere** using Flask as a webhook receiver.
-
----
-
-## 📂 Project Structure
