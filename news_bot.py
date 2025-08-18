@@ -37,6 +37,7 @@ class NewsBot:
                 uid INTEGER NOT NULL,
                 sources TEXT NOT NULL,
                 category TEXT NOT NULL,
+                schedule TEXT DEFAULT "No",
                 date_added TEXT NOT NULL
             """
         )
@@ -163,14 +164,101 @@ class NewsBot:
                 for i, item in enumerate(news_items)
             )
 
-            self.bot.edit_message_text(formatted, call.message.chat.id, call.message.message_id,
-                                       disable_web_page_preview=True)
+            markup = telebot.types.InlineKeyboardMarkup()
+            markup.add(
+                telebot.types.InlineKeyboardButton("🔄 Start Again", callback_data="start_again"),
+                telebot.types.InlineKeyboardButton("📅 Schedule", callback_data="schedule")
+            )
+
+            self.bot.edit_message_text(
+                formatted,
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup,
+                disable_web_page_preview=True
+            )
 
             date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.db.insert(
                 query="INSERT INTO news (uid, sources, category, date_added) VALUES (?, ?, ?, ?)",
                 data_tuple=(uid, ", ".join(sources), category, date_now)
             )
+            self.db.create_table(
+                table_name="schedules",
+                schema="""
+                    uid INTEGER NOT NULL,
+                    sources TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    date_added TEXT NOT NULL
+                """
+            )
+            self.db.insert(
+                query="INSERT INTO schedules (uid, sources, category, date_added) VALUES (?, ?, ?, ?)",
+                data_tuple=(uid, ", ".join(sources), category, date_now)
+            )
+
+        @self.bot.callback_query_handler(func=lambda call: call.data == "start_again")
+        def start_again(call):
+            try:
+                self.bot.answer_callback_query(call.id)
+
+                self.bot.edit_message_reply_markup(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    reply_markup=None
+                )
+
+                start(call.message)
+            except Exception as e:
+                print(f"Error in start_again handler: {e}", file=sys.stderr, flush=True)
+
+        @self.bot.callback_query_handler(func=lambda call: call.data == "schedule")
+        def schedule(call):
+            uid = call.from_user.id
+            selection = self.user_data[uid]
+            category = selection["category"]
+            sources = selection["sources"]
+            date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.db.create_table(
+                table_name="schedules",
+                schema="""
+                    uid INTEGER NOT NULL,
+                    sources TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    date_added TEXT NOT NULL
+                """
+            )
+            self.db.insert(
+                query="""
+                    INSERT INTO schedules (uid, sources, category, date_added)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(uid) DO UPDATE SET
+                        sources=excluded.sources,
+                        category=excluded.category,
+                        date_added=excluded.date_added
+                """,
+                data_tuple=(uid, ", ".join(sources), category, date_now)
+            )
+            self.bot.answer_callback_query(call.id)
+
+            msg = (
+                f"✅ Your selection has been recorded!\n\n"
+                f"📰 **Category:** {category}\n"
+                f"📡 **Sources:** {', '.join(sources)}\n\n"
+                f"📅 Your news is now scheduled to be sent *everyday*."
+            )
+            self.bot.send_message(uid, msg, parse_mode="Markdown")
+        
+        @self.bot.callback_query_handler(func=lambda call: call.data == "unsubscribe")
+        def unsubscribe(call):
+            uid = call.from_user.id
+            deleted = self.db.delete_row("schedules", "uid", uid)
+            deleted = self.db.delete_row("schedules", "uid", uid)
+            if deleted:
+                self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+                self.bot.send_message(uid, "✅ You have unsubscribed from daily updates.\nHope to see you soon!")
+            else:
+                self.bot.answer_callback_query(call.id, "You've already been unsubscribed")
 
     def _setup_routes(self):
         @self.app.route("/", methods=["GET"])

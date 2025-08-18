@@ -24,6 +24,29 @@ class SqDB():
     def insert(self, query: str, data_tuple: tuple):
         self.cursor.execute(query, data_tuple)
         self.conn.commit()
+    
+    def get_latest_entry_from_table(self, table_name, param_name=None, value=None):
+        with SqDB(self.DB_NAME) as db:
+            if param_name is None and value is None:
+                db.cursor.execute(f"""
+                    SELECT * FROM {table_name}
+                    ORDER BY rowid DESC
+                    LIMIT 1
+                """)
+            elif (param_name is None) ^ (value is None):
+                raise ValueError("If you provide 'param_name', you must also provide 'value' (and vice versa).")
+            else:
+                db.cursor.execute(f"""
+                    SELECT * FROM {table_name}
+                    WHERE {param_name} = ?
+                    ORDER BY rowid DESC
+                    LIMIT 1
+                """, (value,))
+            row = db.cursor.fetchone()
+            if row:
+                return dict(row)
+            else:
+                raise ValueError("Data nor found. Please check your params.")
 
     def delete_tables(self):
         self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
@@ -33,6 +56,11 @@ class SqDB():
                 self.cursor.execute(f"DROP TABLE IF EXISTS {table_name[0]};")
 
         self.conn.commit()
+
+    def delete_row(self, param, val):
+        self.cursor.execute(f"DELETE FROM my_table WHERE {param} = ?", (val,))
+        self.conn.commit()
+        return self.cursor.rowcount > 0
 
     def close(self):
         self.conn.close()
