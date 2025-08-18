@@ -1,6 +1,6 @@
 # 📰 Telegram News Bot with SQLite & Flask (Webhook on PythonAnywhere)
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.13%2B-blue)
 ![Flask](https://img.shields.io/badge/Flask-2.x-lightgrey)
 ![SQLite](https://img.shields.io/badge/SQLite-DB-blue)
 ![Telegram Bot](https://img.shields.io/badge/Telegram-Bot-blue)
