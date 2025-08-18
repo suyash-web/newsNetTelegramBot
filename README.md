@@ -45,7 +45,7 @@ cd newsNetTelegramBot
 ```bash
 python3 -m venv venv
 source venv/bin/activate   # On Linux/Mac
-venv\Scriptsctivate      # On Windows
+venv\Scripts\ctivate      # On Windows
 ```
 
 ### 3. Install Dependencies
