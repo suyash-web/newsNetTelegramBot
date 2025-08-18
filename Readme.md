@@ -1,6 +1,6 @@
 # 📰 Telegram News Bot with SQLite & Flask (Webhook on PythonAnywhere)
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.13%2B-blue)
 ![Flask](https://img.shields.io/badge/Flask-2.x-lightgrey)
 ![SQLite](https://img.shields.io/badge/SQLite-DB-blue)
 ![Telegram Bot](https://img.shields.io/badge/Telegram-Bot-blue)
@@ -37,8 +37,8 @@ It uses **webhooks** instead of polling to receive updates from Telegram, making
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/yourusername/telegram-news-bot.git
-cd telegram-news-bot
+git clone https://github.com/suyash-web/newsNetTelegramBot.git
+cd newsNetTelegramBot
 ```
 
 ### 2. Create a Virtual Environment
@@ -83,7 +83,7 @@ Get:
 3. Point WSGI file to your `flask_app.py`.  
 4. Set webhook:
    ```
-   https://api.telegram.org/bot<YOUR_TOKEN>/setWebhook?url=https://<your-username>.pythonanywhere.com/webhook
+   https://api.telegram.org/bot<BOT_TOKEN>/setWebhook?url=https://<your-username>.pythonanywhere.com/webhook
    ```
 5. Check logs (`/var/log/.../error.log` & `access.log`) if something goes wrong.
 

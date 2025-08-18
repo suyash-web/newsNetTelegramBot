@@ -67,7 +67,10 @@ for data in schedule_data:
         + "\n\nHave a great day!"
     )
     markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(telebot.types.InlineKeyboardButton("❌ Unsubscribe", callback_data="unsubscribe"))
+    markup.add(
+            telebot.types.InlineKeyboardButton("❌ Unsubscribe", callback_data="unsubscribe"),
+            telebot.types.InlineKeyboardButton("🔧 Customize", callback_data="customize")
+        )
 
     bot.send_message(
         uid,

@@ -22,6 +22,7 @@ class NewsBot:
         self._setup_database()
         self.newsapi = NewsApiClient(api_key=self.api_key)
         self.news_sources = self._define_sources()
+
         self._register_handlers()
         self._setup_routes()
 
@@ -35,9 +36,9 @@ class NewsBot:
             schema="""
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 uid INTEGER NOT NULL,
+                first_name TEXT NOT NULL,
                 sources TEXT NOT NULL,
                 category TEXT NOT NULL,
-                schedule TEXT DEFAULT "No",
                 date_added TEXT NOT NULL
             """
         )
@@ -100,17 +101,26 @@ class NewsBot:
         @self.bot.message_handler(commands=["start"])
         def start(message):
             try:
+                chat_id = message.chat.id
                 markup = telebot.types.InlineKeyboardMarkup()
                 for category in self.news_sources.keys():
                     markup.add(telebot.types.InlineKeyboardButton(category, callback_data=f"cat_{category}"))
-                self.bot.send_message(message.chat.id, "Choose a category:", reply_markup=markup)
+                self.bot.send_message(chat_id, "Choose a category:", reply_markup=markup)
             except Exception as e:
                 print(f"Error in start handler: {e}", file=sys.stderr, flush=True)
 
         @self.bot.callback_query_handler(func=lambda call: call.data.startswith("cat_"))
         def select_category(call):
+            uid = call.from_user.id
             category = call.data.split("_", 1)[1]
-            self.user_data[call.from_user.id] = {"category": category, "sources": set()}
+
+            # preserve any existing flags (e.g., mode='customize')
+            prev = self.user_data.get(uid, {})
+            self.user_data[uid] = {
+                "category": category,
+                "sources": set(),
+                "mode": prev.get("mode")
+            }
 
             markup = telebot.types.InlineKeyboardMarkup()
             for source in self.news_sources[category]:
@@ -146,14 +156,71 @@ class NewsBot:
         @self.bot.callback_query_handler(func=lambda call: call.data == "done")
         def finish_selection(call):
             uid = call.from_user.id
+            first_name = call.from_user.first_name
             selection = self.user_data[uid]
             category = selection["category"]
             sources = selection["sources"]
+            is_customizing = selection.get("mode") == "customize"
 
+            # try:
+            #     self.bot.delete_message(call.message.chat.id, call.message.message_id)
+            # except Exception:
+            #     pass
+
+            date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            if is_customizing:
+                # CUSTOMIZE MODE: update schedules only, no headlines
+                self.db.create_table(
+                    table_name="schedules",
+                    schema="""
+                        uid INTEGER UNIQUE,
+                        first_name TEXT NOT NULL,
+                        sources TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        date_added TEXT NOT NULL
+                    """
+                )
+                # replace row for this uid
+                self.db.delete_row("schedules", "uid", uid)
+                self.db.insert(
+                    query="INSERT INTO schedules (uid, first_name, sources, category, date_added) VALUES (?, ?, ?, ?, ?)",
+                    data_tuple=(uid, first_name, ", ".join(sources), category, date_now)
+                )
+
+                # clear inline keyboard on the original message and confirm
+                try:
+                    self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+                except Exception:
+                    pass
+                self.bot.answer_callback_query(call.id)
+
+                try:
+                    self.bot.delete_message(call.message.chat.id, call.message.message_id)
+                except Exception:
+                    pass
+
+                self.bot.send_message(
+                    uid,
+                    "✅ Your choices has been updated.\n"
+                    f"📰 Category: {category}\n"
+                    f"📡 Sources: {', '.join(sources) if sources else '—'}\n\n"
+                    "Thanks!"
+                )
+
+                # reset mode so future flows are normal
+                selection.pop("mode", None)
+                self.user_data[uid] = selection
+                return
+
+            # NORMAL MODE: send headlines + buttons
             news_items = self.get_filtered_news(list(sources), category)
             if not news_items:
-                self.bot.edit_message_text(f"No news found for {category} from selected sources.",
-                                           call.message.chat.id, call.message.message_id)
+                self.bot.edit_message_text(
+                    f"No news found for {category} from selected sources.",
+                    call.message.chat.id,
+                    call.message.message_id
+                )
                 return
 
             for item in news_items:
@@ -178,36 +245,20 @@ class NewsBot:
                 disable_web_page_preview=True
             )
 
-            date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self.db.insert(
-                query="INSERT INTO news (uid, sources, category, date_added) VALUES (?, ?, ?, ?)",
-                data_tuple=(uid, ", ".join(sources), category, date_now)
-            )
-            self.db.create_table(
-                table_name="schedules",
-                schema="""
-                    uid INTEGER NOT NULL,
-                    sources TEXT NOT NULL,
-                    category TEXT NOT NULL,
-                    date_added TEXT NOT NULL
-                """
-            )
-            self.db.insert(
-                query="INSERT INTO schedules (uid, sources, category, date_added) VALUES (?, ?, ?, ?)",
-                data_tuple=(uid, ", ".join(sources), category, date_now)
+                query="INSERT INTO news (uid, first_name, sources, category, date_added) VALUES (?, ?, ?, ?, ?)",
+                data_tuple=(uid, first_name, ", ".join(sources), category, date_now)
             )
 
         @self.bot.callback_query_handler(func=lambda call: call.data == "start_again")
         def start_again(call):
             try:
                 self.bot.answer_callback_query(call.id)
-
                 self.bot.edit_message_reply_markup(
                     chat_id=call.message.chat.id,
                     message_id=call.message.message_id,
                     reply_markup=None
                 )
-
                 start(call.message)
             except Exception as e:
                 print(f"Error in start_again handler: {e}", file=sys.stderr, flush=True)
@@ -215,14 +266,17 @@ class NewsBot:
         @self.bot.callback_query_handler(func=lambda call: call.data == "schedule")
         def schedule(call):
             uid = call.from_user.id
+            first_name = call.from_user.first_name
             selection = self.user_data[uid]
             category = selection["category"]
             sources = selection["sources"]
             date_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
             self.db.create_table(
                 table_name="schedules",
                 schema="""
-                    uid INTEGER NOT NULL,
+                    uid INTEGER UNIQUE,
+                    first_name TEXT NOT NULL,
                     sources TEXT NOT NULL,
                     category TEXT NOT NULL,
                     date_added TEXT NOT NULL
@@ -230,14 +284,15 @@ class NewsBot:
             )
             self.db.insert(
                 query="""
-                    INSERT INTO schedules (uid, sources, category, date_added)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO schedules (uid, first_name, sources, category, date_added)
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(uid) DO UPDATE SET
+                        first_name=excluded.first_name,
                         sources=excluded.sources,
                         category=excluded.category,
                         date_added=excluded.date_added
                 """,
-                data_tuple=(uid, ", ".join(sources), category, date_now)
+                data_tuple=(uid, first_name, ", ".join(sources), category, date_now)
             )
             self.bot.answer_callback_query(call.id)
 
@@ -245,18 +300,55 @@ class NewsBot:
                 f"✅ Your selection has been recorded!\n\n"
                 f"📰 **Category:** {category}\n"
                 f"📡 **Sources:** {', '.join(sources)}\n\n"
-                f"📅 Your news is now scheduled to be sent *everyday*."
+                f"📅 Your news is now scheduled to be sent *everyday*.\n\n"
+                f"Thanks!"
             )
             self.bot.send_message(uid, msg, parse_mode="Markdown")
-        
+
+        @self.bot.callback_query_handler(func=lambda call: call.data == "customize")
+        def customize(call):
+            uid = call.from_user.id
+
+            # Mark user as customizing (do not delete/update DB yet)
+            current = self.user_data.get(uid, {})
+            current["mode"] = "customize"
+            self.user_data[uid] = current
+
+            # Remove inline keyboard from the last message
+            try:
+                self.bot.edit_message_reply_markup(
+                    chat_id=call.message.chat.id,
+                    message_id=call.message.message_id,
+                    reply_markup=None
+                )
+            except Exception:
+                pass
+
+            self.bot.answer_callback_query(call.id)
+
+            # Show category selection again
+            markup = telebot.types.InlineKeyboardMarkup()
+            for category in self.news_sources.keys():
+                markup.add(
+                    telebot.types.InlineKeyboardButton(category, callback_data=f"cat_{category}")
+                )
+
+            self.bot.send_message(
+                uid,
+                "🔧 Let's customize your daily news again!\n\nChoose a category:",
+                reply_markup=markup
+            )
+
         @self.bot.callback_query_handler(func=lambda call: call.data == "unsubscribe")
         def unsubscribe(call):
             uid = call.from_user.id
             deleted = self.db.delete_row("schedules", "uid", uid)
-            deleted = self.db.delete_row("schedules", "uid", uid)
             if deleted:
-                self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-                self.bot.send_message(uid, "✅ You have unsubscribed from daily updates.\nHope to see you soon!")
+                try:
+                    self.bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+                except Exception:
+                    pass
+                self.bot.send_message(uid, "✅  You have unsubscribed from daily updates.\nHope to see you soon!")
             else:
                 self.bot.answer_callback_query(call.id, "You've already been unsubscribed")
 

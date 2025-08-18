@@ -4,6 +4,7 @@ class SqDB():
     def __init__(self, db_name):
         self.DB_NAME = db_name
         self.conn = sqlite3.connect(self.DB_NAME)
+        self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
 
     def __enter__(self):
@@ -47,6 +48,12 @@ class SqDB():
                 return dict(row)
             else:
                 raise ValueError("Data nor found. Please check your params.")
+
+    def get_all_data_from_table(self, table_name):
+        with SqDB(self.DB_NAME) as db:
+            db.cursor.execute(f"SELECT * FROM {table_name}")
+            data = db.cursor.fetchall()
+        return [dict(row) for row in data]
 
     def delete_tables(self):
         self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
